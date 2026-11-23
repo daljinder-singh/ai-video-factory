@@ -1,0 +1,7 @@
+piper-tts
+imageio-ffmpeg
+faster-whisper
+manim
+pydantic
+requests
+Pillow
