@@ -1,7 +1,10 @@
-piper-tts
+kokoro-onnx
 imageio-ffmpeg
 faster-whisper
 manim
 pydantic
 requests
 Pillow
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

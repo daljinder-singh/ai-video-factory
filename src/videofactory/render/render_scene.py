@@ -12,11 +12,11 @@ from pathlib import Path
 
 import numpy as np
 from manim import (DOWN, LEFT, RIGHT, UP, WHITE, AnimationGroup, Circle, FadeIn, FadeOut, Line,
-                   Rectangle, Scene, VGroup, tempconfig, Create, linear)
+                   MovingCameraScene, Rectangle, VGroup, tempconfig, Create, linear, smooth)
 
 from . import templates as tp
 
-FRAME_W, FRAME_H = 14.222, 8.0
+FRAME_W, FRAME_H = 14.222, 8.0  # landscape; vertical Shorts use 9 x 16 (set in render())
 MIN_TEXT_SIZE = 20  # manim font size after all scaling; below this is hard to read on a phone
 
 
@@ -44,7 +44,7 @@ def core(m):
     return m
 
 
-class SpecScene(Scene):
+class SpecScene(MovingCameraScene):
     job: dict = {}
 
     def setup_frame(self):
@@ -54,12 +54,15 @@ class SpecScene(Scene):
         bg.set_fill(color=[tp.BG, "#121A33"])
         bg.set_sheen_direction(UP + RIGHT)
         orbs = VGroup(*[Circle(radius=r, stroke_width=0, fill_color=c, fill_opacity=0.06)
-                        .move_to(p) for r, c, p in ((3.2, a, [-6.5, -3.5, 0]), (2.4, a, [6.8, 3.6, 0]))])
+                        .move_to(p) for r, c, p in ((3.2, a, [-FRAME_W / 2 + 0.6, -FRAME_H / 2 + 0.5, 0]),
+                                                    (2.4, a, [FRAME_W / 2 - 0.3, FRAME_H / 2 - 0.4, 0]))])
         self.add(bg, orbs)
         self.persist = [bg, orbs]
         orbs.add_updater(lambda m, dt: m.rotate(0.03 * dt, about_point=[0, 0, 0]))  # slow ambient drift
-        chip = tp.T(j["category"].upper(), 20, color=a, bold=True)
+        chip = tp.T((j.get("label") or j["category"]).upper(), 20, color=a, bold=True)
         chip.to_corner(UP + RIGHT, buff=0.45)
+        if tp.VERTICAL:
+            chip.set_opacity(0)  # Shorts: no room beside the heading; the platform shows the channel anyway
         track = Line([-FRAME_W / 2, -FRAME_H / 2 + 0.06, 0], [FRAME_W / 2, -FRAME_H / 2 + 0.06, 0],
                      stroke_width=6, color="#1E2747")
         frac_a, frac_b = j["index"] / j["total"], (j["index"] + 1) / j["total"]
@@ -71,7 +74,9 @@ class SpecScene(Scene):
         self.progress = (prog, x0 + FRAME_W * frac_b)
         header = VGroup()
         if j["visual"]["template"] not in ("title_card",) and j.get("heading"):
-            title = tp.T(j["heading"], 46, bold=True, max_w=11.0)
+            title = tp.T(j["heading"], 46 if not tp.VERTICAL else 52, bold=True,
+                         max_w=FRAME_W - (3.2 if not tp.VERTICAL else 1.2),
+                         width=None if not tp.VERTICAL else 22)
             title.to_corner(UP + LEFT, buff=0.5)
             bar = Line(title.get_corner(DOWN + LEFT) + DOWN * 0.18,
                        title.get_corner(DOWN + LEFT) + DOWN * 0.18 + RIGHT * min(title.width, 3.0),
@@ -84,6 +89,15 @@ class SpecScene(Scene):
         a = tp.ACCENTS.get(j["category"], "#64B5F6")
         b = tp.SECOND.get(j["category"], "#F06292")
         duration = float(j["duration"])
+        plan = j.get("plan") or {}
+        vertical = tp.VERTICAL
+        if vertical:  # 9:16: content between the heading and the caption zone (bottom ~1/3 is captions + app UI)
+            # keep clear of the Shorts action buttons on the right (~12% of the width)
+            tp.AREA_W, tp.AREA_TOP, tp.AREA_BOTTOM = 7.6, FRAME_H / 2 - 2.4, -FRAME_H / 2 + 6.1  # captions below
+        if plan.get("transition") == "flash" and j["index"] > 0:
+            flash = Rectangle(width=FRAME_W + 0.4, height=FRAME_H + 0.4, fill_color=WHITE, fill_opacity=0.85, stroke_width=0)
+        else:
+            flash = None
         header = self.setup_frame()
         presenter = None
         if j.get("presenter"):
@@ -91,7 +105,7 @@ class SpecScene(Scene):
             env = voice_envelope(j["wav"], j["fps"]) if j.get("wav") and Path(j["wav"]).exists() else []
             presenter = Presenter(j["category"], a, env, j["fps"], list(j["cues"]),
                                   wave_hello=j["visual"]["template"] == "title_card")
-            presenter.place(3.7, np.array([7.0, -4.25, 0]))
+            presenter.place(3.7, np.array([FRAME_W / 2 - 0.11, -FRAME_H / 2 - 0.25, 0]))
             presenter.add_updater(lambda m: m.tick(self.time))
             self.add(presenter)
             self.persist.append(presenter)
@@ -100,9 +114,9 @@ class SpecScene(Scene):
         built = tp.BUILDERS[j["visual"]["template"]](j["visual"], a, b)
         content = built.content
         # fit the content into the area under the heading
-        top = tp.AREA_TOP if len(header) else 3.2
+        top = tp.AREA_TOP if len(header) else (FRAME_H / 2 - 0.8 if not vertical else FRAME_H / 2 - 1.6)
         avail_w, avail_h = (10.3 if presenter else tp.AREA_W), top - tp.AREA_BOTTOM
-        cx = -1.55 if presenter else 0.0
+        cx = -1.55 if presenter else (-0.35 if vertical else 0.0)
         scale = min(1.0, avail_w / max(content.width, 1e-3), avail_h / max(content.height, 1e-3))
         if scale < 1.0:
             content.scale(scale)
@@ -114,13 +128,17 @@ class SpecScene(Scene):
             swap[0].add_updater(lambda m: m.move_to(target))
             swap[0].update()
         self.layout_report(header, built)
+        self.start_camera(plan.get("camera", "none"), content, duration)
+        if flash is not None:
+            self.add(flash)
+            self.play(FadeOut(flash), run_time=0.25)
 
         # timeline: header + intro, then units at cue times, then idle motion, then fade out
         prog, prog_end = self.progress
         if len(header):
             self.play(FadeIn(header[0], shift=RIGHT * 0.3), Create(header[1]),
                       prog.animate.put_start_and_end_on(prog.get_start(), [prog_end, prog.get_y(), 0]),
-                      run_time=0.8)
+                      run_time=0.4 if plan.get("transition") == "cut" else 0.8)
         else:
             self.play(prog.animate.put_start_and_end_on(prog.get_start(), [prog_end, prog.get_y(), 0]),
                       run_time=0.6)
@@ -158,10 +176,39 @@ class SpecScene(Scene):
             else:
                 self.wait(remaining)
         left = duration - self.time
-        self.play(*[FadeOut(m) for m in self.mobjects if m not in self.base_mobs()], run_time=max(0.2, min(0.6, left)))
+        leaving = [m for m in self.mobjects if m not in self.base_mobs() and m is not self.camera.frame]
+        if plan.get("transition") == "slide":
+            self.play(*[FadeOut(m, shift=LEFT * 1.5) for m in leaving], run_time=max(0.2, min(0.6, left)))
+        else:
+            self.play(*[FadeOut(m) for m in leaving], run_time=max(0.2, min(0.6, left)))
+
+    def start_camera(self, move: str, content, duration: float) -> None:
+        """Subtle, eased camera moves (never wider than the frame, so no edges show)."""
+        if move == "none":
+            return
+        frame = self.camera.frame
+        w0, c0 = frame.width, frame.get_center().copy()
+        focus = content.get_center().copy()
+
+        def cam(m):
+            s = smooth(min(1.0, self.time / max(duration, 0.1)))
+            if move == "push_in":
+                k, c = 1 - 0.07 * s, c0 + (focus - c0) * 0.3 * s
+            elif move == "pull_out":
+                k, c = 0.91 + 0.09 * s, c0 + (focus - c0) * 0.3 * (1 - s)
+            elif move == "drift_left":
+                k, c = 0.95, c0 + RIGHT * 0.35 * (1 - 2 * s)
+            else:  # drift_right
+                k, c = 0.95, c0 + LEFT * 0.35 * (1 - 2 * s)
+            m.set(width=w0 * k)
+            m.move_to(c)
+
+        self.add(frame)
+        frame.add_updater(cam)
+        cam(frame)
 
     def base_mobs(self):
-        return self.persist  # background, orbs, progress bar, category chip and presenter stay on screen
+        return self.persist + [self.camera.frame]  # background, orbs, progress, chip, presenter stay on screen
 
     def layout_report(self, header, built):
         issues, sizes = [], []
@@ -205,7 +252,11 @@ def render(job: dict) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
     tp.TEXT_LOG.clear()
     with tempfile.TemporaryDirectory() as tmp:
+        global FRAME_W, FRAME_H
+        tp.VERTICAL = job["height"] > job["width"]
+        FRAME_W, FRAME_H = (9.0, 16.0) if tp.VERTICAL else (14.222, 8.0)
         cfg = {"pixel_width": job["width"], "pixel_height": job["height"], "frame_rate": job["fps"],
+               "frame_height": FRAME_H, "frame_width": FRAME_W,
                "media_dir": tmp, "output_file": "scene", "disable_caching": True, "verbosity": "ERROR",
                "progress_bar": "none", "background_color": tp.BG, "write_to_movie": True}
         with tempconfig(cfg):

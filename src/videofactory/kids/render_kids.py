@@ -43,8 +43,27 @@ def KT(s: str, size: float, color: str = INK, max_w: float | None = None, outlin
     return t
 
 
+_SVG_TMP: Path | None = None
+
+
+def private_svg(src) -> str:
+    """Manim writes a temporary '<name>_.svg' next to an SVG while loading it, which races when several render
+    processes load the same file at once. Give each process its own copy of every SVG it uses."""
+    global _SVG_TMP
+    import shutil as _sh
+    import tempfile as _tf
+
+    if _SVG_TMP is None:
+        _SVG_TMP = Path(_tf.mkdtemp(prefix="svg_"))
+    src = Path(src)
+    dst = _SVG_TMP / f"{src.parent.name}_{src.name}"
+    if not dst.exists():
+        _sh.copyfile(src, dst)
+    return str(dst)
+
+
 def E(code: str, h: float) -> SVGMobject:
-    return SVGMobject(str(EMOJI / f"{code}.svg")).scale_to_fit_height(h)
+    return SVGMobject(private_svg(EMOJI / f"{code}.svg")).scale_to_fit_height(h)
 
 
 def readable(color: str) -> str:

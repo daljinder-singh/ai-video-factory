@@ -1,14 +1,16 @@
-"""Local narration with Piper. Synthesizes sentence by sentence so we know exactly when each sentence is spoken."""
+"""Local English narration with Kokoro. Synthesizes sentence by sentence so we know exactly when each sentence is spoken."""
 from __future__ import annotations
 
 import re
 import wave
+from functools import lru_cache
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 
 SENT_RE = re.compile(r"(?<=[.!?।])\s+")
+EMPHASIS = re.compile(r"\d|\b(but|actually|surprisingly|in fact|imagine|that'?s why|the answer)\b", re.I)
 
 
 @dataclass
@@ -56,22 +58,41 @@ def split_sentences(text: str, max_words: int = 28) -> list[str]:
     return out
 
 
-class Narrator:
-    def __init__(self, voice_path: Path, speed: float = 1.0):
-        from piper import PiperVoice, SynthesisConfig
+KOKORO_DIR = Path(__file__).resolve().parents[2] / "models" / "kokoro"
+KOKORO_VOICES = {  # best-rated English voices of Kokoro v1.0 (Apache 2.0)
+    "af_heart": "American female, warm (default)", "af_bella": "American female, bright",
+    "af_nicole": "American female, soft", "am_michael": "American male", "am_fenrir": "American male, deep",
+    "bf_emma": "British female", "bm_george": "British male",
+}
 
-        if not Path(voice_path).exists():
-            raise FileNotFoundError(f"Piper voice not found: {voice_path}")
-        self.voice = PiperVoice.load(str(voice_path))
-        self.cfg = SynthesisConfig(length_scale=1.0 / speed)
-        self.sr = self.voice.config.sample_rate
+
+@lru_cache(maxsize=1)
+def _kokoro():
+    from kokoro_onnx import Kokoro
+
+    model, voices = KOKORO_DIR / "kokoro-v1.0.onnx", KOKORO_DIR / "voices-v1.0.bin"
+    if not model.exists() or not voices.exists():
+        raise FileNotFoundError(f"Kokoro model files missing in {KOKORO_DIR} (kokoro-v1.0.onnx, voices-v1.0.bin)")
+    return Kokoro(str(model), str(voices))
+
+
+class Narrator:
+    """Local English narration with Kokoro (82M parameters, runs on CPU)."""
+
+    def __init__(self, voice: str = "af_heart", speed: float = 1.0):
+        self.kokoro = _kokoro()
+        if voice not in self.kokoro.get_voices():
+            raise ValueError(f"Unknown Kokoro voice {voice!r}. Try one of: {', '.join(KOKORO_VOICES)}")
+        self.voice, self.speed = voice, float(min(max(speed, 0.5), 2.0))
+        self.sr = 24000
 
     def synth(self, text: str) -> np.ndarray:
-        chunks = [c.audio_float_array for c in self.voice.synthesize(text, syn_config=self.cfg)]
-        audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
+        audio, sr = self.kokoro.create(text, voice=self.voice, speed=self.speed, lang="en-us")
+        self.sr = sr
+        audio = np.asarray(audio, dtype=np.float32)
         # trim leading/trailing near-silence so our own gaps control the pacing
         idx = np.flatnonzero(np.abs(audio) > 0.01)
-        return audio[max(idx[0] - 200, 0): idx[-1] + 400] if idx.size else audio
+        return audio[max(idx[0] - 240, 0): idx[-1] + 480] if idx.size else audio
 
     def narrate(self, text: str, out_wav: Path, lead: float = 0.5, gap: float = 0.35,
                 tail: float = 0.9) -> Narration:
@@ -84,8 +105,9 @@ class Narrator:
             if a.size == 0:
                 continue
             if i:
-                parts.append(np.zeros(int(gap * sr), np.float32))
-                t += gap
+                g = gap + (0.25 if EMPHASIS.search(sentence) else 0.0)  # breathe before a key fact
+                parts.append(np.zeros(int(g * sr), np.float32))
+                t += g
             segments.append(Segment(sentence, round(t, 3), round(t + a.size / sr, 3)))
             parts.append(a)
             t += a.size / sr

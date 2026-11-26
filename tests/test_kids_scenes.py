@@ -23,10 +23,9 @@ OUT = ROOT / "output" / "dev" / "kids" / "scenes"
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     w, h, fps = QUALITY["low"]
-    voices = {lang: Narrator(ROOT / "models" / "piper" / f"{v}.onnx", 0.85)
-              for lang, v in (("en", "en_US-lessac-medium"), ("hi", "hi_IN-pratham-medium"))}
+    voices = {"en": Narrator("af_bella", 0.85)}
     picks, seen = [], set()
-    for lang in ("en", "hi"):
+    for lang in ("en",):
         for topic in TOPICS:
             for sc in build_script(topic, lang, 5)["scenes"]:
                 key = sc["type"] if lang == "en" else f"hi_{sc['type']}"

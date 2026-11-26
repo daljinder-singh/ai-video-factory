@@ -45,9 +45,8 @@ def recipe_metadata(script: dict, offsets: list[float]) -> dict:
         f"Learn how to make {name} at home, step by step." if lang == "en" else f"घर पर {name} बनाना सीखें, स्टेप बाय स्टेप।",
         "", "Ingredients:", *[f"- {i}" for i in script["ingredients"]], "",
         *(["Chapters:", ch, ""] if ch else []),
-        f"Recipe adapted from the Wikibooks Cookbook: {script['url']} (CC BY-SA 4.0).",
-        "Music: original, generated for this video. Emoji graphics: Twemoji (CC-BY 4.0).",
-        f"#recipe #{slug(name).replace('-', '')} #indianfood"])
+        f"#recipe #{slug(name).replace('-', '')} #indianfood", "",
+        "Sources: Wikibooks Cookbook (CC BY-SA 4.0) · Pictures: Twemoji (CC-BY 4.0)"])
     tags = [name, f"{name} recipe", f"how to make {name}", "indian recipe", "easy recipe", "cooking", "home cooking",
             "step by step recipe"] + (["hindi recipe", "रेसिपी"] if lang != "en" else [])
     return {"title": title[:100], "description": desc[:4900], "tags": tags, "category": "Howto & Style",
@@ -58,7 +57,7 @@ def recipe_metadata(script: dict, offsets: list[float]) -> dict:
 def make_recipe_video(settings: Settings, dish: str | None = None, seed: int | None = None,
                       resume: Path | None = None) -> Path:
     seed = seed if seed is not None else random.randrange(1_000_000)
-    lang = settings.language
+    lang = "en"  # English only
     if resume and (resume / "recipe.json").exists():
         recipe = Recipe.from_dict(json.loads((resume / "recipe.json").read_text()))
         saved = json.loads((resume / "script.json").read_text()) if (resume / "script.json").exists() else {}
@@ -89,8 +88,7 @@ def make_recipe_video(settings: Settings, dish: str | None = None, seed: int | N
     if np_.exists():
         narrs = json.loads(np_.read_text())
     else:
-        voice = settings.voices[lang]
-        narrator = Narrator(Path(settings.models_dir) / "piper" / f"{voice}.onnx", 0.95 * settings.speech_speed)
+        narrator = Narrator(settings.recipe_voice, 0.95 * settings.speech_speed)
         narrs = [narrate_parts(narrator, sc["parts"], run.path("audio", f"scene_{sc['index']:02}.wav"),
                                gap=0.45, tail=1.6 if sc["type"] == "step" else 1.0) for sc in scenes]
         np_.write_text(json.dumps(narrs, indent=2, ensure_ascii=False))

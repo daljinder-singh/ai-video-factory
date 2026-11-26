@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 import requests
 
@@ -19,6 +19,7 @@ class Source:
     url: str
     text: str  # cleaned, truncated plain text with "## Section" headings
     license: str = "CC BY-SA 4.0"
+    credits: list = field(default_factory=list)  # extra sources: [{"name", "url", "license"}]
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -143,7 +143,8 @@ def _limits_text(model: type[BaseModel]) -> str:
     return "; ".join(out)
 
 
-DANGLING = {"a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with", "by", "as", "at", "from",
+DANGLING = {"a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with", "by", "as", "at", "from", "vs", "vs.",
+            "versus",
             "that", "which", "is", "are", "its", "their", "your"}
 
 
@@ -191,7 +192,10 @@ def _repair_lengths(raw: dict, err: ValidationError) -> dict:
 
 class ScriptWriter:
     def __init__(self, llm: Ollama, language: str = "en", min_scenes: int = 6, max_scenes: int = 9,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print, short: bool = False):
+        self.short = short
+        if short:  # YouTube Shorts: 30-45 seconds
+            min_scenes, max_scenes = 4, 6
         self.llm, self.language, self.log = llm, language, log
         self.min_scenes, self.max_scenes = min_scenes, max_scenes
 
@@ -207,12 +211,14 @@ class ScriptWriter:
         )
 
     # ---------- step 1: outline ----------
-    def outline(self, source: Source, category: str, brief: str = "") -> dict:
+    def outline(self, source: Source, category: str, brief: str = "", topic: str = "") -> dict:
         allowed = list(TEMPLATE_GUIDE)
         schema = {
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
+                "title_options": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
+                "hook_line": {"type": "string"},
                 "hook": {"type": "string"},
                 "description": {"type": "string"},
                 "tags": {"type": "array", "items": {"type": "string"}},
@@ -223,28 +229,39 @@ class ScriptWriter:
                         "properties": {
                             "heading": {"type": "string"},
                             "template": {"type": "string", "enum": allowed},
+                            "purpose": {"type": "string", "enum": ["hook", "setup", "explain", "reveal", "payoff", "ending"]},
                             "key_points": {"type": "array", "items": {"type": "string"}},
+                            "highlight": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
                         },
-                        "required": ["heading", "template", "key_points"],
+                        "required": ["heading", "template", "purpose", "key_points", "highlight"],
                     },
                 },
             },
-            "required": ["title", "hook", "description", "tags", "scenes"],
+            "required": ["title", "title_options", "hook_line", "hook", "description", "tags", "scenes"],
         }
         guide = "\n".join(f"- {k}: {v}" for k, v in TEMPLATE_GUIDE.items())
         prefer = ", ".join(CATEGORY_PREFERRED.get(category, []))
         user = (
-            f"Plan a {self.min_scenes}-{self.max_scenes} scene explainer video about \"{source.title}\" "
-            f"(category: {category}).\n"
+            f"Plan a {self.min_scenes}-{self.max_scenes} scene "
+            + ("vertical YouTube Short (30-45 seconds) " if self.short else "explainer video ")
+            + f"about \"{source.title}\" (category: {category}).\n"
+            "Tell it as a STORY, not a textbook: hook -> curiosity -> visual explanation -> surprising payoff -> "
+            "memorable ending. Every scene must have a clear purpose.\n"
             "Fields:\n"
-            "- title: catchy but accurate YouTube title, max 70 characters, in English\n"
+            "- title: catchy but accurate YouTube title, max 70 characters, in English. Spark curiosity (a question, "
+            "or 'you' framing) but it MUST match the real content; no clickbait words\n"
+            "- title_options: 3 different title ideas following the same rules\n"
+            "- hook_line: the very first spoken sentence (max 15 words): a surprising fact, question or 'imagine...' "
+            "taken from the source. NEVER start with hello, welcome, today, or 'in this video'\n"
             + (f"SERIES BRIEF (follow it): {brief}\n" if brief else "") +
             "- hook: 2-4 word thumbnail text, in English\n"
             "- description: 2-3 sentence YouTube description of what viewers learn, in English\n"
             "- tags: 8-12 search keywords, in English\n"
-            "- scenes: logical story order. Scene 1 template MUST be title_card. Last scene template MUST be summary. "
-            "Each scene has a heading (a specific on-screen title of max 6 words, never a template name), "
-            "a visual template, and 2-4 key_points taken from the source.\n"
+            "- scenes: story order. Scene 1 template MUST be title_card (purpose hook). Last scene template MUST be "
+            "summary (purpose ending). Each scene has a heading (specific on-screen title, max 6 words, never a "
+            "template name), a visual template, a purpose (hook, setup, explain, reveal, payoff, ending), 2-4 "
+            "key_points taken from the source, and 1-3 highlight words (the most important words of that scene).\n"
+            "Explain through visual events: processes, comparisons, cause and effect, scale, before/after.\n"
             f"Visual templates:\n{guide}\n"
             f"For this category prefer: {prefer}. The video must be VISUAL: use graphic templates (graphs, charts, "
             "flows, cycles, diagrams) for most scenes, use each template at most twice, and use bullet_list at most once.\n"
@@ -275,8 +292,18 @@ class ScriptWriter:
                 if sc["heading"].strip().lower().replace(" ", "_") in TEMPLATE_GUIDE or "title card" in sc["heading"].lower():
                     sc["heading"] = ((data.get("title") or source.title)[:40] if sc is scenes[0] else
                                      "Key takeaways" if sc["template"] == "summary" else sc["key_points"][0][:40])
+            from .planner import assign_purposes, enforce_variety, pick_title
+
+            assign_purposes(scenes)
+            before = [sc["template"] for sc in scenes]
+            enforce_variety(scenes, category, self.short)
+            changed = [f"{i + 1}:{a}->{sc['template']}" for i, (a, sc) in enumerate(zip(before, scenes)) if a != sc["template"]]
+            if changed:
+                self.log(f"  variety: changed {', '.join(changed)}")
             data["scenes"] = scenes
-            data["title"] = (data.get("title") or source.title).strip()[:95]
+            data["title_options"] = [t for t in data.get("title_options", []) if isinstance(t, str)][:3]
+            data["title"] = pick_title(data["title_options"], f"{topic} {source.title}",
+                                       (data.get("title") or source.title).strip())
             data["hook"] = " ".join((data.get("hook") or source.title).split()[:4])[:40]
             data["tags"] = [t.strip() for t in data.get("tags", []) if t.strip()][:15]
             return data
@@ -289,6 +316,8 @@ class ScriptWriter:
         model = TEMPLATE_MODELS[tpl]
         lo, hi = WORDS[self.language]
         n_min, n_max = (3, 5) if tpl == "title_card" else (4, 7)
+        if self.short:
+            n_min, n_max = (1, 2) if tpl == "title_card" else (2, 3)
         if tpl == "title_card":
             lo, hi = 22, 75
         flow = "\n".join(f"{n + 1}. {s['heading']} ({s['template']})" for n, s in enumerate(outline["scenes"]))
@@ -302,17 +331,24 @@ class ScriptWriter:
             "required": ["sentences", "visual"],
         }
         schema["$defs"] = schema["properties"]["visual"].pop("$defs", {})
-        role = ("This is the OPENING scene: greet briefly, hook the viewer with why the topic matters, "
-                "and say what the video covers." if i == 0 else
-                "This is the CLOSING scene: recap the key ideas and end with a memorable final thought."
-                if i == len(outline["scenes"]) - 1 else
-                "Continue naturally from the previous scene; do not greet the viewer again.")
+        purpose = plan.get("purpose", "explain")
+        role = {
+            "hook": (f"This is the OPENING HOOK. The first sentence must be (or closely follow): \"{outline.get('hook_line', '')}\". "
+                     "Create curiosity immediately. NEVER greet the viewer (no hello, welcome, today we, in this video)."),
+            "setup": "Set up the mystery or question the video will answer; give the viewer a reason to keep watching.",
+            "explain": "Explain through what the viewer SEES: a process, comparison, cause and effect, or scale.",
+            "reveal": "Build up briefly, then reveal the most surprising fact from the source.",
+            "payoff": "Deliver the satisfying answer to the question raised at the start.",
+            "ending": ("This is the ENDING: one-line recap, then finish with a memorable fact or thought-provoking "
+                       "question from the source. No 'like and subscribe', no generic goodbye."),
+        }.get(purpose, "Continue naturally from the previous scene; do not greet the viewer again.")
         user = (
             f"Video: \"{outline['title']}\". Scene plan:\n{flow}\n\n"
             f"Write scene {i + 1}: \"{plan['heading']}\". Key points: {plan['key_points']}\n"
             f"{role}\n{LANG_RULES[self.language]}\n"
-            f"- sentences: the spoken narration as {n_min} to {n_max} complete, informative sentences "
-            "(each 10-25 words), in a natural spoken style. No markdown, no scene labels.\n"
+            f"- sentences: the spoken narration as {n_min} to {n_max} complete, vivid sentences "
+            f"({'each 6-16 words, punchy' if self.short else 'each 10-25 words'}), in a natural spoken style. "
+            "No markdown, no scene labels.\n"
             f"- visual: content for the '{tpl}' template ({TEMPLATE_GUIDE[tpl]}). "
             f"On-screen text must be short, complete phrases (never cut off). Limits: {_limits_text(model)}. "
             "The visual must show exactly what the narration explains, in the same order."
@@ -330,7 +366,14 @@ class ScriptWriter:
             sentences = data.get("sentences") or []
             if isinstance(sentences, str):
                 sentences = [sentences]
-            narration = _clean_narration(" ".join(str(x).strip() for x in sentences))
+            # make sure every sentence ends with punctuation (the model sometimes returns note-style fragments)
+            seen, uniq = set(), []
+            for x in (str(y).strip() for y in sentences):  # drop repeated sentences
+                key = re.sub(r"\W+", " ", x.lower()).strip()
+                if x and key not in seen:
+                    seen.add(key)
+                    uniq.append(x if re.search(r"[.!?।]$", x) else x + ".")
+            narration = _clean_narration(" ".join(uniq))
             problems = []
             visual = None
             raw = _tidy_visual({**(data.get("visual") or {}), "template": tpl})
@@ -354,15 +397,25 @@ class ScriptWriter:
                 keys = [_year_key(e.when) for e in visual.events]
                 if None not in keys and keys != sorted(keys):  # put events in chronological order
                     visual.events = [e for _, e in sorted(zip(keys, visual.events), key=lambda x: x[0])]
+            from .planner import BANNED_OPENERS, CALL_TO_ACTION
+
+            if BANNED_OPENERS.search(narration):
+                problems.append("do not start with a greeting or 'today/in this video'; start with the hook itself")
+            if CALL_TO_ACTION.search(narration):
+                problems.append("remove the call to action (subscribe/like); end with a memorable fact or question")
             wc = _word_count(narration)
-            if wc < 20 or wc > hi + 30:  # hard limits; the prompt asks for the ideal range
+            min_wc = 8 if self.short else 20
+            max_wc = (18 if tpl == "title_card" else 30) if self.short else hi + 30  # Shorts stay ~30-45 s
+            if wc < min_wc or wc > max_wc:  # hard limits; the prompt asks for the ideal range
                 problems.append(f"narration has {wc} words; write {n_min} to {n_max} full sentences")
             bad = unsupported_numbers(narration + " " + (visual_text(visual) if visual else ""), source_numbers)
             if bad:
                 problems.append(f"these numbers are NOT in the source, remove or correct them: {bad}")
             last = (narration, visual)
             if not problems:
-                return Scene(index=i, heading=plan["heading"], narration=narration, visual=visual)
+                return Scene(index=i, heading=plan["heading"], narration=narration, visual=visual,
+                             purpose=plan.get("purpose", "explain"), highlight=[h for h in plan.get("highlight", [])
+                                                                               if isinstance(h, str) and h.strip()][:3])
             self.log(f"    scene {i + 1} attempt {attempt + 1} rejected: {'; '.join(problems)[:300]}")
             feedback = [{"role": "assistant", "content": json.dumps(data, ensure_ascii=False)},
                         {"role": "user", "content": "Fix these problems and answer again:\n- " + "\n- ".join(problems)}]
@@ -374,7 +427,7 @@ class ScriptWriter:
         sentences = re.split(r"(?<=[.!?।])\s+", narration)
         kept = [s for s in sentences if s and not unsupported_numbers(s, source_numbers)]
         narration = " ".join(kept)
-        if _word_count(narration) < 15:
+        if _word_count(narration) < (8 if self.short else 15):
             raise LLMError(f"Scene {i + 1} ({plan['heading']}) could not be written with verified facts")
         if visual is None or unsupported_numbers(visual_text(visual), source_numbers):
             pts = [smart_trim(p.rstrip("."), 70) for p in plan["key_points"]
@@ -383,20 +436,36 @@ class ScriptWriter:
                 pts = [smart_trim(s.rstrip("."), 70) for s in kept[:3]]
             visual = BulletList(heading=smart_trim(plan["heading"], 40), items=pts[:4] if len(pts) >= 2 else pts * 2)
         self.log(f"    scene {i + 1}: used verified fallback ({visual.template})")
-        return Scene(index=i, heading=plan["heading"], narration=narration, visual=visual)
+        return Scene(index=i, heading=plan["heading"], narration=narration, visual=visual,
+                     purpose=plan.get("purpose", "explain"), highlight=list(plan.get("highlight", []))[:3])
 
     def write(self, source: Source, topic: str, category: str, brief: str = "") -> VideoScript:
         source_numbers = numbers_in(source.text)
         self.log("  outlining...")
-        outline = self.outline(source, category, brief)
+        outline = self.outline(source, category, brief, topic)
         self.log(f"  outline: {outline['title']!r}, {len(outline['scenes'])} scenes: "
                  + ", ".join(s["template"] for s in outline["scenes"]))
         scenes = []
         for i in range(len(outline["scenes"])):
             self.log(f"  writing scene {i + 1}/{len(outline['scenes'])}: {outline['scenes'][i]['heading']}")
             scenes.append(self.scene(source, outline, i, source_numbers))
+        from .planner import quality_score
+
+        q = quality_score(scenes, self.short)
+        self.log(f"  quality: {q}")
+        if q["hook"] < 6:  # one rewrite of the opening, never an endless loop
+            self.log("  hook is weak: rewriting the opening scene once")
+            outline["hook_line"] = outline.get("hook_line") or ""
+            retry = self.scene(source, outline, 0, source_numbers)
+            if quality_score([retry] + scenes[1:], self.short)["hook"] > q["hook"]:
+                scenes[0] = retry
+                q = quality_score(scenes, self.short)
+                self.log(f"  quality after rewrite: {q}")
+        if q["overall"] < 6:
+            self.log("  WARNING: quality score is low; continuing anyway")
         return VideoScript(
             topic=topic, category=category, language=self.language, title=outline["title"],
             hook=outline["hook"], description=outline["description"], tags=outline["tags"],
             source_title=source.title, source_url=source.url, scenes=scenes,
+            title_options=outline.get("title_options", []), short=self.short, quality=q,
         )

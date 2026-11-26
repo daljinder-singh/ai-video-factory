@@ -66,9 +66,10 @@ def main() -> int:
                "" if shutil.which(tex) else "optional (MathTex); sudo apt install texlive-latex-extra dvisvgm")
 
     # --- Voice / subtitles ---
-    check_module("piper")
-    voices = sorted(p.stem for p in (ROOT / "models" / "piper").glob("*.onnx"))
-    report(OK if voices else FAIL, "piper voices", ", ".join(voices) or "none in models/piper/")
+    check_module("kokoro_onnx")
+    kd = ROOT / "models" / "kokoro"
+    ok = (kd / "kokoro-v1.0.onnx").exists() and (kd / "voices-v1.0.bin").exists()
+    report(OK if ok else FAIL, "kokoro voice model", str(kd) if ok else f"missing files in {kd}")
     check_module("faster_whisper")
 
     # --- Fonts for Hindi text in animations/thumbnails ---

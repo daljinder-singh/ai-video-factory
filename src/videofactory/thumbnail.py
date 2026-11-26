@@ -117,3 +117,37 @@ def make_thumbnail(hook: str, category: str, frame_video: Path, frame_time: floa
     d.rectangle((56, y + 12, 56 + 220, y + 24), fill=b + (255,))
     img.convert("RGB").save(out, quality=95)
     frame_png.unlink(missing_ok=True)
+
+
+def make_vertical_cover(hook: str, frame_video: Path, frame_time: float, out: Path, accent: str) -> None:
+    """1080x1920 cover for Shorts: the real frame fills the screen, hook text in the upper safe area."""
+    VW, VH = 1080, 1920
+    frame_png = out.with_name("cover_frame.png")
+    run_ffmpeg("-ss", f"{frame_time:.2f}", "-i", str(frame_video), "-frames:v", "1", str(frame_png))
+    img = Image.open(frame_png).convert("RGB").resize((VW, VH), Image.LANCZOS)
+    shade = Image.new("RGBA", (VW, VH), (0, 0, 0, 0))
+    ImageDraw.Draw(shade).rectangle((0, 0, VW, 760), fill=(5, 8, 20, 190))
+    img = Image.alpha_composite(img.convert("RGBA"), shade)
+    d = ImageDraw.Draw(img)
+    a = _hex(accent)
+    words = hook.upper().split()
+    for size in range(150, 60, -6):
+        f = _font("Noto Sans", True, size)
+        lines, cur = [], ""
+        for w in words:
+            trial = f"{cur} {w}".strip()
+            if cur and d.textlength(trial, font=f) > VW - 140:
+                lines.append(cur)
+                cur = w
+            else:
+                cur = trial
+        lines.append(cur)
+        if len(lines) <= 3 and all(d.textlength(x, font=f) <= VW - 140 for x in lines):
+            break
+    y = 160
+    for i, line in enumerate(lines):
+        d.text((70, y), line, font=f, fill=a if i == len(lines) - 1 else (255, 255, 255),
+               stroke_width=max(4, f.size // 14), stroke_fill=(0, 0, 0))
+        y += int(f.size * 1.1)
+    img.convert("RGB").save(out, quality=95)
+    frame_png.unlink(missing_ok=True)

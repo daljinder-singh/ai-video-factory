@@ -38,7 +38,8 @@ class QC:
 
 
 def run_qc(final: Path, scene_videos: list[Path], scene_wavs: list[Path], expected_scene_durations: list[float],
-           narrations: list[str], srt: Path, thumbnail: Path, language: str, whisper: bool = True) -> QC:
+           narrations: list[str], srt: Path, thumbnail: Path, language: str, whisper: bool = True,
+           short: bool = False) -> QC:
     qc = QC()
 
     # 1. files exist and decode
@@ -84,7 +85,13 @@ def run_qc(final: Path, scene_videos: list[Path], scene_wavs: list[Path], expect
     # 5. animation pacing: no scene too short or overlong
     pacing = [f"scene {i + 1} {d:.1f}s" for i, d in enumerate(expected_scene_durations) if d < 5 or d > 75]
     qc.add("scene pacing (5-75s)", "warn" if pacing else "pass", ", ".join(pacing))
-    qc.add("total length", "pass" if 60 <= vd <= 900 else "warn", f"{vd / 60:.1f} min")
+    if short:  # vertical Short: 9:16 and under a minute
+        vs = next(s for s in info["streams"] if s["codec_type"] == "video")
+        portrait = int(vs["height"]) > int(vs["width"])
+        qc.add("vertical 9:16 format", "pass" if portrait else "fail", f"{vs['width']}x{vs['height']}")
+        qc.add("Short length (15-60s)", "pass" if 15 <= vd <= 60 else "warn", f"{vd:.0f} s")
+    else:
+        qc.add("total length", "pass" if 60 <= vd <= 900 else "warn", f"{vd / 60:.1f} min")
 
     # 6. black/frozen output
     r = subprocess.run(["ffmpeg", "-i", str(final), "-vf", "blackdetect=d=1.5:pix_th=0.05", "-an", "-f", "null", "-"],

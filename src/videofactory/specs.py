@@ -227,11 +227,27 @@ CATEGORY_PREFERRED = {
 }
 
 
+PURPOSES = ("hook", "setup", "explain", "reveal", "payoff", "ending")
+
+
+class ScenePlan(BaseModel):
+    """How a scene is staged. Filled by the planner (rules), not by the LLM; every field has a safe default."""
+    camera: Literal["none", "push_in", "pull_out", "drift_left", "drift_right"] = "none"
+    transition: Literal["fade", "slide", "flash", "cut"] = "fade"
+    sound_effects: list[str] = Field(default_factory=list)  # e.g. ["whoosh", "pop", "impact"]
+    music_mood: Literal["curious", "mysterious", "dramatic", "calm", "uplifting"] = "curious"
+    presenter: bool = True
+    presenter_action: Literal["idle", "point", "wave"] = "point"
+
+
 class Scene(BaseModel):
     index: int
     heading: str
     narration: str
     visual: Visual
+    purpose: str = "explain"  # hook | setup | explain | reveal | payoff | ending
+    highlight: list[str] = Field(default_factory=list)  # key words to emphasise in captions
+    plan: ScenePlan = Field(default_factory=ScenePlan)
 
 
 class VideoScript(BaseModel):
@@ -245,6 +261,9 @@ class VideoScript(BaseModel):
     source_title: str
     source_url: str
     scenes: list[Scene] = Field(min_length=3)
+    title_options: list[str] = Field(default_factory=list)
+    short: bool = False  # vertical YouTube Shorts format
+    quality: dict = Field(default_factory=dict)  # pre-render quality scores
 
 
 def reveal_units(v: BaseModel) -> list[str]:

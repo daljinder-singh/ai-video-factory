@@ -11,6 +11,8 @@ QUALITY = {  # name: (width, height, fps)
     "low": (854, 480, 15),
     "medium": (1280, 720, 30),
     "high": (1920, 1080, 30),
+    "short": (1080, 1920, 30),  # vertical 9:16 (YouTube Shorts / Reels)
+    "short_low": (540, 960, 15),  # fast vertical preview
 }
 
 
@@ -18,20 +20,21 @@ QUALITY = {  # name: (width, height, fps)
 class Settings:
     llm_model: str = "qwen3:4b"
     ollama_url: str = "http://localhost:11434"
-    language: str = "en"  # en | hi | hinglish
-    voices: dict = field(default_factory=lambda: {
-        "en": "en_US-lessac-medium",
-        "hi": "hi_IN-pratham-medium",
-        "hinglish": "hi_IN-pratham-medium",
-    })
+    language: str = "en"  # English only
+    voice: str = "af_heart"  # Kokoro voice for explainers and Shorts
+    kids_voice: str = "af_bella"  # Kokoro voice for kids videos
+    recipe_voice: str = "af_heart"  # Kokoro voice for recipe videos
     speech_speed: float = 1.0  # 1.2 = 20% faster
     quality: str = "high"
     min_scenes: int = 6
     max_scenes: int = 9
     music_path: str | None = None  # optional background music file
-    music_volume: float = 0.10
+    music_volume: float = 0.12
     burn_subtitles: bool = False  # also keep the .srt for YouTube either way
     presenter: bool = True  # animated cartoon host (character chosen by topic category)
+    short: bool = False  # vertical 9:16 YouTube Short (30-45 s); sets quality "short"
+    sfx: bool = True  # subtle synthesised sound effects on scene events
+    auto_music: bool = True  # original background score that follows the story's mood
     render_workers: int = 3
     output_dir: str = str(ROOT / "output" / "videos")
     models_dir: str = str(ROOT / "models")
@@ -39,9 +42,6 @@ class Settings:
     @property
     def resolution(self) -> tuple[int, int, int]:
         return QUALITY[self.quality]
-
-    def voice_path(self) -> Path:
-        return Path(self.models_dir) / "piper" / f"{self.voices[self.language]}.onnx"
 
     @classmethod
     def load(cls, **overrides) -> "Settings":
@@ -55,8 +55,10 @@ class Settings:
         if unknown:
             raise ValueError(f"Unknown settings: {sorted(unknown)}")
         s = cls(**data)
-        if s.language not in ("en", "hi", "hinglish"):
-            raise ValueError("language must be en, hi or hinglish")
+        if s.language != "en":
+            raise ValueError("Only English videos are supported (language must be 'en')")
+        if s.short and not s.quality.startswith("short"):
+            s.quality = "short"
         if s.quality not in QUALITY:
             raise ValueError(f"quality must be one of {list(QUALITY)}")
         if not 0.5 <= s.speech_speed <= 2.0:

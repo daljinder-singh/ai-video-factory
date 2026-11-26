@@ -35,6 +35,12 @@ SECOND = {
 }
 # content area below the heading (manim units; frame is 14.22 x 8)
 AREA_W, AREA_TOP, AREA_BOTTOM = 13.0, 2.45, -3.35
+VERTICAL = False  # set by the scene runner for 9:16 Shorts
+
+
+def V(landscape, vertical):
+    """Pick a layout value for the current orientation."""
+    return vertical if VERTICAL else landscape
 TEXT_LOG: list[Text] = []
 
 
@@ -92,7 +98,9 @@ CATEGORY = ""  # set by the scene runner
 
 
 def icon(name: str, color, h: float = 0.9) -> VMobject:
-    m = SVGMobject(str(icon_path(name)))
+    from ..kids.render_kids import private_svg
+
+    m = SVGMobject(private_svg(icon_path(name)))
     m.set_fill(opacity=0).set_stroke(color=color, width=max(2.5, 4.2 * h), opacity=1)
     m.scale_to_fit_height(h)
     return m
@@ -124,9 +132,9 @@ def pop_labelled(g: VGroup) -> Animation:
 # ---------------------------------------------------------------- templates
 def title_card(spec, a, b) -> Built:
     hero = icon_disc(icon_for(spec["title"] + " " + spec["subtitle"], CATEGORY), a, r=0.85)
-    title = T(spec["title"], 76, bold=True, width=22, max_w=12)
+    title = T(spec["title"], V(76, 80), bold=True, width=V(22, 13), max_w=V(12, 7.4))
     bar = Line(LEFT * 2.5, RIGHT * 2.5, color=a, stroke_width=8)
-    sub = T(spec["subtitle"], 36, color=MUTED, width=42, max_w=11.5)
+    sub = T(spec["subtitle"], V(36, 42), color=MUTED, width=V(42, 22), max_w=V(11.5, 7.4))
     g = VGroup(hero, title, bar, sub).arrange(DOWN, buff=0.4)
     # orbiting particles around the hero icon
     orbit_r = 1.35
@@ -146,10 +154,10 @@ def title_card(spec, a, b) -> Built:
 
 def definition(spec, a, b) -> Built:
     hero = icon_disc(icon_for(spec["term"] + " " + spec["definition"], CATEGORY), a, r=0.6)
-    term = T(spec["term"], 64, color=a, bold=True, max_w=10.5)
+    term = T(spec["term"], 64, color=a, bold=True, max_w=V(10.5, 5.6), width=V(None, 14))
     head = VGroup(hero, term).arrange(RIGHT, buff=0.45)
-    body = T(spec["definition"], 38, width=44, max_w=11.2)
-    box = card(max(body.width + 1.0, 8), body.height + 0.9, a)
+    body = T(spec["definition"], V(38, 42), width=V(44, 22), max_w=V(11.2, 6.8))
+    box = card(max(body.width + 1.0, V(8, 6.8)), body.height + 0.9, a)
     body.move_to(box)
     quote = T("“", 120, color=a).next_to(box, UL, buff=-0.35)
     g = VGroup(head, VGroup(box, body, quote)).arrange(DOWN, buff=0.6)
@@ -170,7 +178,7 @@ def bullet_list(spec, a, b) -> Built:
     rows = []
     for i, (item, name) in enumerate(zip(spec["items"], names)):
         disc = icon_disc(name, a if i % 2 == 0 else b, r=0.42)
-        txt = T(item, 36, width=44, max_w=10.2)
+        txt = T(item, V(36, 40), width=V(44, 20), max_w=V(10.2, 6.0))
         rows.append(VGroup(disc, txt).arrange(RIGHT, buff=0.45))
     g = VGroup(*rows).arrange(DOWN, buff=0.4, aligned_edge=LEFT)
     return Built(g, units=[(lambda r=r: AnimationGroup(pop(r[0]), FadeIn(r[1], shift=RIGHT * 0.4), lag_ratio=0.3))
@@ -181,25 +189,32 @@ def process_flow(spec, a, b) -> Built:
     steps = spec["steps"]
     n = len(steps)
     names = icons_for(steps, CATEGORY)
-    per_row = n if n <= 4 else 3
-    w = min(3.0, (AREA_W - 0.9 * (per_row - 1)) / per_row)
-    h = 2.5 if n <= 4 else 2.25
+    per_row = 1 if VERTICAL else (n if n <= 4 else 3)
+    w = 7.0 if VERTICAL else min(3.0, (AREA_W - 0.9 * (per_row - 1)) / per_row)
+    h = (1.1 if n > 4 else 1.35) if VERTICAL else (2.5 if n <= 4 else 2.25)
     boxes = []
     for i, (s, name) in enumerate(zip(steps, names)):
         col = a if i % 2 == 0 else b
         box = card(w, h, col)
         ic = icon(name, col, h=0.85 if n <= 4 else 0.6)
-        txt = T(s, 28, width=max(8, int(w * 4.4)), max_w=w - 0.3)
-        if txt.height > h * 0.5:
-            txt.scale_to_fit_height(h * 0.5)
-        inner = VGroup(ic, txt).arrange(DOWN, buff=0.22).move_to(box)
+        if VERTICAL:  # icon left, text right, in a wide box
+            ic = icon(name, col, h=min(0.8, h * 0.6))
+            txt = T(s, 36, width=18, max_w=w - 1.8)
+            if txt.height > h * 0.8:
+                txt.scale_to_fit_height(h * 0.8)
+            inner = VGroup(ic, txt).arrange(RIGHT, buff=0.35).move_to(box)
+        else:
+            txt = T(s, 28, width=max(8, int(w * 4.4)), max_w=w - 0.3)
+            if txt.height > h * 0.5:
+                txt.scale_to_fit_height(h * 0.5)
+            inner = VGroup(ic, txt).arrange(DOWN, buff=0.22).move_to(box)
         num = Circle(radius=0.26, fill_color=col, fill_opacity=1, stroke_width=0)
-        num_t = T(str(i + 1), 24, color=BG, bold=True).move_to(num)
+        num_t = T(str(i + 1), V(24, 30), color=BG, bold=True).move_to(num)
         VGroup(num, num_t).move_to(box.get_corner(UL))
         boxes.append(VGroup(box, inner, num, num_t))
     rows = [VGroup(*boxes[i:i + per_row]).arrange(RIGHT, buff=0.9) for i in range(0, n, per_row)]
-    VGroup(*rows).arrange(DOWN, buff=0.9)
-    if len(rows) == 2:  # snake: second row runs right-to-left, starting under the last box of row 1
+    VGroup(*rows).arrange(DOWN, buff=V(0.9, 0.5))
+    if len(rows) == 2 and not VERTICAL:  # snake: second row runs right-to-left, under the last box of row 1
         x_right = boxes[per_row - 1].get_x()
         for k, bx in enumerate(boxes[per_row:]):
             bx.set_x(x_right - k * (w + 0.9))
@@ -255,11 +270,11 @@ def cycle(spec, a, b) -> Built:
     ctext = T(spec["center"], 26, bold=True, width=10, max_w=1.7)
     VGroup(cicon, ctext).arrange(DOWN, buff=0.12).move_to(center)
     nodes, arrows = [], []
-    RX, RY = 4.3, 2.35
+    RX, RY = V((4.3, 2.35), (2.55, 3.6))
     angles = [math.pi / 2 - 2 * math.pi * i / n for i in range(n)]
     for i, (s, ang, name) in enumerate(zip(stages, angles, names)):
         pos = np.array([RX * math.cos(ang), RY * math.sin(ang), 0])
-        nd = labelled_icon(s, name, a if i % 2 == 0 else b, r=0.48, size=24, chars=14, max_w=2.6)
+        nd = labelled_icon(s, name, a if i % 2 == 0 else b, r=0.48, size=V(24, 32), chars=V(14, 11), max_w=V(2.6, 3.0))
         if math.sin(ang) > 0.3:
             nd[1].next_to(nd[0], UP, buff=0.15)
         nd.shift(pos - nd[0].get_center())
@@ -297,9 +312,14 @@ def cycle(spec, a, b) -> Built:
 def comparison(spec, a, b) -> Built:
     def column(title, items, color):
         hero = icon_disc(icon_for(title + " " + " ".join(items), CATEGORY), color, r=0.5)
-        head = T(title, 36, color=color, bold=True, max_w=5.2)
-        rows = VGroup(*[T("• " + it, 28, width=30, max_w=5.4) for it in items]).arrange(DOWN, buff=0.3,
-                                                                                      aligned_edge=LEFT)
+        head = T(title, V(36, 40), color=color, bold=True, max_w=V(5.2, 5.0))
+        rows = VGroup(*[T("• " + it, V(28, 32), width=V(30, 26), max_w=V(5.4, 6.6)) for it in items]).arrange(
+            DOWN, buff=0.25, aligned_edge=LEFT)
+        if VERTICAL:  # icon + title side by side to save height
+            inner = VGroup(VGroup(hero, head).arrange(RIGHT, buff=0.3), rows).arrange(DOWN, buff=0.3)
+            box = card(7.4, inner.height + 0.6, color)
+            inner.move_to(box)
+            return VGroup(box, VGroup(inner[0][0], inner[0][1], rows))
         inner = VGroup(hero, head, rows).arrange(DOWN, buff=0.35)
         box = card(6.0, max(inner.height + 0.8, 4.4), color)
         inner.move_to(box)
@@ -307,23 +327,26 @@ def comparison(spec, a, b) -> Built:
 
     left = column(spec["left_title"], spec["left_items"], a)
     right = column(spec["right_title"], spec["right_items"], b)
-    h = max(left[0].height, right[0].height)
-    for c in (left, right):
-        c[0].stretch_to_fit_height(h)
-        c[1].move_to(c[0])
-    VGroup(left, right).arrange(RIGHT, buff=1.0)
+    if VERTICAL:
+        VGroup(left, right).arrange(DOWN, buff=0.9)
+    else:
+        h = max(left[0].height, right[0].height)
+        for c in (left, right):
+            c[0].stretch_to_fit_height(h)
+            c[1].move_to(c[0])
+        VGroup(left, right).arrange(RIGHT, buff=1.0)
     vs = VGroup(Circle(radius=0.42, fill_color=BG, fill_opacity=1, stroke_color=WHITE, stroke_width=3),
                 T("VS", 28, bold=True))
     vs[1].move_to(vs[0])
-    vs.move_to((left.get_right() + right.get_left()) / 2)
+    vs.move_to((left.get_bottom() + right.get_top()) / 2 if VERTICAL else (left.get_right() + right.get_left()) / 2)
 
     def col_in(c, d):
         return AnimationGroup(FadeIn(c[0], shift=d * 0.4), pop(c[1][0]), FadeIn(c[1][1]),
                               LaggedStart(*[FadeIn(r, shift=d * 0.2) for r in c[1][2]], lag_ratio=0.3), lag_ratio=0.25)
 
     return Built(VGroup(left, right, vs),
-                 units=[lambda: col_in(left, RIGHT),
-                        lambda: AnimationGroup(GrowFromCenter(vs), col_in(right, LEFT), lag_ratio=0.3)],
+                 units=[lambda: col_in(left, V(RIGHT, DOWN)),
+                        lambda: AnimationGroup(GrowFromCenter(vs), col_in(right, V(LEFT, UP)), lag_ratio=0.3)],
                  unit_mobs=[left, VGroup(right, vs)], focus=False)
 
 
@@ -331,6 +354,23 @@ def timeline(spec, a, b) -> Built:
     events = spec["events"]
     n = len(events)
     names = icons_for([e["label"] for e in events], CATEGORY)
+    if VERTICAL:
+        axis = Line(UP * 4.4, DOWN * 4.4, color=MUTED, stroke_width=4).shift(LEFT * 2.6)
+        ys = np.linspace(3.6, -3.6, n) if n > 1 else [0]
+        items = []
+        for i, (e, y, name) in enumerate(zip(events, ys, names)):
+            col = a if i % 2 == 0 else b
+            disc = icon_disc(name, col, r=0.45).move_to([-2.6, y, 0])
+            txt = VGroup(T(e["when"], 38, color=col, bold=True, max_w=4.6),
+                         T(e["label"], 32, width=16, max_w=4.6)).arrange(DOWN, buff=0.08, aligned_edge=LEFT)
+            txt.next_to(disc, RIGHT, buff=0.35)
+            items.append(VGroup(disc, txt))
+        marker = Triangle(color=WHITE, fill_opacity=1).scale(0.16).rotate(math.pi).move_to([-2.6, 4.6, 0])
+        content = VGroup(axis, *items, marker)
+        units = [(lambda it=it: AnimationGroup(marker.animate.move_to(it[0].get_center() + UP * 0.66),
+                                               AnimationGroup(pop(it[0]), FadeIn(it[1], shift=LEFT * 0.2)),
+                                               lag_ratio=0.5)) for it in items]
+        return Built(content, intro=[lambda: Create(axis), lambda: FadeIn(marker)], units=units, unit_mobs=items)
     axis = Line(LEFT * 6.2, RIGHT * 6.2, color=MUTED, stroke_width=4)
     xs = np.linspace(-5.0, 5.0, n) if n > 1 else [0]
     items = []
@@ -364,7 +404,7 @@ def concept_map(spec, a, b) -> Built:
     items = []
     for i, (label, name) in enumerate(zip(nodes, names)):
         ang = math.pi / 2 - 2 * math.pi * i / n + (math.pi / n if n % 2 == 0 else 0)
-        pos = np.array([4.5 * math.cos(ang), 2.2 * math.sin(ang), 0])
+        pos = np.array([V(4.5, 2.5) * math.cos(ang), V(2.2, 3.6) * math.sin(ang), 0])
         nd = labelled_icon(label, name, b if i % 2 else a, r=0.45, size=24, chars=14, max_w=2.7)
         if math.sin(ang) > 0.3:  # upper half: label above the icon, away from the hub
             nd[1].next_to(nd[0], UP, buff=0.15)
@@ -395,6 +435,8 @@ def concept_map(spec, a, b) -> Built:
 
 # ---------------------------------------------------------------- graphic templates
 def _axes(x_len=9.5, y_len=4.6, y_min=0.0, y_max=10.0, x_min=0.0, x_max=10.0) -> Axes:
+    if VERTICAL:
+        x_len, y_len = min(x_len, 6.2), max(y_len, 6.0)
     return Axes(x_range=[x_min, x_max, (x_max - x_min) / 4], y_range=[y_min, y_max, (y_max - y_min) / 4],
                 x_length=x_len, y_length=y_len, tips=True,
                 axis_config={"color": MUTED, "stroke_width": 3, "include_ticks": False, "include_numbers": False})
@@ -425,7 +467,12 @@ def function_graph(spec, a, b) -> Built:
         g = ax.plot(f, x_range=[0, 10], color=col, stroke_width=6)
         areas.append(ax.get_area(g, x_range=[0, 10], color=col, opacity=0.12))
         curves.append(g)
-        labels.append(T(c["label"], 26, color=col, bold=True, max_w=3.0).next_to(ax.c2p(10, f(10)), RIGHT, buff=0.2))
+        lab = T(c["label"], V(26, 34), color=col, bold=True, max_w=V(3.0, 3.4), width=V(None, 12))
+        if VERTICAL:  # narrow frame: label just above the curve's end, inside the plot
+            lab.next_to(ax.c2p(10, f(10)), UP, buff=0.2).align_to(ax.c2p(10, 0), RIGHT)
+        else:
+            lab.next_to(ax.c2p(10, f(10)), RIGHT, buff=0.2)
+        labels.append(lab)
     # keep end labels from colliding
     order = sorted(range(len(labels)), key=lambda k: labels[k].get_y())
     for prev, cur in zip(order, order[1:]):
@@ -507,8 +554,8 @@ def pie_chart(spec, a, b) -> Built:
         lab = T(s["label"], 28, max_w=4.2)
         val = T(_fmt(s["value"]) + (unit if len(unit) <= 2 else " " + unit), 28, color=palette[i % 6], bold=True, max_w=1.8)
         legend.append(VGroup(sw, lab, val).arrange(RIGHT, buff=0.25))
-    pie = VGroup(*sectors).move_to(LEFT * 3.0)
-    leg = VGroup(*legend).arrange(DOWN, buff=0.35, aligned_edge=LEFT).move_to(RIGHT * 3.2)
+    pie = VGroup(*sectors).move_to(V(LEFT * 3.0, UP * 2.4))
+    leg = VGroup(*legend).arrange(DOWN, buff=0.35, aligned_edge=LEFT).move_to(V(RIGHT * 3.2, DOWN * 2.2))
     centre_icon = icon(icon_for(spec["heading"], CATEGORY), WHITE, h=0.8).move_to(pie.get_center())
     content = VGroup(pie, leg, centre_icon)
     units = [(lambda i=i: AnimationGroup(FadeIn(sectors[i], scale=0.85), FadeIn(legend[i], shift=LEFT * 0.3), lag_ratio=0.2))
@@ -532,7 +579,7 @@ def pyramid(spec, a, b) -> Built:
     levels = spec["levels"]  # bottom first
     n = len(levels)
     names = icons_for(levels, CATEGORY)
-    H, W0 = 5.2, 7.6
+    H, W0 = V((5.2, 7.6), (6.4, 5.0))
     lh = H / n
     bottom = -H / 2
     tiers = []
@@ -543,7 +590,7 @@ def pyramid(spec, a, b) -> Built:
         shape = Polygon([-w0 / 2, y0, 0], [w0 / 2, y0, 0], [w1 / 2, y1, 0], [-w1 / 2, y1, 0],
                         fill_color=col, fill_opacity=0.9, stroke_color=BG, stroke_width=3)
         ic = icon(name, BG, h=min(0.55, lh * 0.55)).move_to([0, (y0 + y1) / 2 - (0.05 if i < n - 1 else lh * 0.15), 0])
-        txt = T(label, 28, bold=True, max_w=4.6)
+        txt = T(label, V(28, 40), bold=True, max_w=V(4.6, 3.6), width=V(None, 12))
         txt.move_to([W0 / 2 + 0.4 + txt.width / 2, (y0 + y1) / 2, 0])
         lead = DashedLine([(w0 + w1) / 4 + 0.1, (y0 + y1) / 2, 0], [W0 / 2 + 0.3, (y0 + y1) / 2, 0],
                           color=MUTED, stroke_width=2, dash_length=0.08)
@@ -591,11 +638,19 @@ def network(spec, a, b) -> Built:
     for i, (lay, x) in enumerate(zip(layers, xs)):
         k = lay["nodes"]
         col = a if i in (0, L - 1) else b
-        ys = np.linspace((k - 1) * 0.42, -(k - 1) * 0.42, k) + 0.3
-        ns = [Circle(radius=0.27, fill_color=PANEL, fill_opacity=1, stroke_color=col, stroke_width=4).move_to([x, y, 0])
-              for y in ys]
+        spread = np.linspace((k - 1) * 0.42, -(k - 1) * 0.42, k)
+        if VERTICAL:  # layers are rows from top to bottom; label on the left of each row
+            y = np.linspace(3.8, -3.8, L)[i]
+            pts = [[1.2 + v * -1.25, y, 0] for v in spread]
+        else:
+            pts = [[x, v + 0.3, 0] for v in spread]
+        ns = [Circle(radius=0.27, fill_color=PANEL, fill_opacity=1, stroke_color=col, stroke_width=4).move_to(pt)
+              for pt in pts]
         nodes.append(ns)
-        lab = T(lay["label"], 24, width=12, max_w=min(2.6, 10.0 / L)).move_to([x, -2.75, 0])
+        if VERTICAL:
+            lab = T(lay["label"], 30, width=10, max_w=2.6).move_to([-3.2, pts[0][1], 0])
+        else:
+            lab = T(lay["label"], 24, width=12, max_w=min(2.6, 10.0 / L)).move_to([x, -2.75, 0])
         cols.append(VGroup(*ns, lab))
     edges = []
     for i in range(1, L):
@@ -643,7 +698,7 @@ def bar_chart(spec, a, b) -> Built:
     bars = spec["bars"]
     n = len(bars)
     vmax = max(x["value"] for x in bars) or 1
-    H, W = 4.2, min(1.6, 10.5 / n - 0.4)
+    H, W = V((4.2, min(1.6, 10.5 / n - 0.4)), (5.5, min(1.5, 7.0 / n - 0.25)))
     base_y = -2.4
     xs = np.linspace(-(n - 1) * (W + 0.55) / 2, (n - 1) * (W + 0.55) / 2, n)
     baseline = Line([xs[0] - W, base_y, 0], [xs[-1] + W, base_y, 0], color=MUTED, stroke_width=3)
@@ -653,8 +708,8 @@ def bar_chart(spec, a, b) -> Built:
         rect = Rectangle(width=W, height=h, fill_color=a if i % 2 == 0 else b, fill_opacity=0.95, stroke_width=0)
         rect.move_to([x, base_y + h / 2, 0])
         val = T(_fmt(bar["value"]) + (" " + spec["unit"] if spec.get("unit") and len(spec["unit"]) <= 4 else ""),
-                28, bold=True, max_w=W + 0.5).next_to(rect, UP, buff=0.15)
-        lab = T(bar["label"], 24, color=MUTED, width=10, max_w=W + 0.5).next_to(baseline, DOWN, buff=0.2)
+                V(28, 38), bold=True, max_w=W + 0.6).next_to(rect, UP, buff=0.15)
+        lab = T(bar["label"], V(24, 34), color=MUTED, width=V(10, 7), max_w=W + 0.6).next_to(baseline, DOWN, buff=0.2)
         lab.set_x(x)
         groups.append(VGroup(rect, val, lab))
     unit_note = T(spec["unit"], 24, color=MUTED, max_w=4) if spec.get("unit") and len(spec["unit"]) > 4 else None
@@ -679,7 +734,8 @@ def big_number(spec, a, b) -> Built:
     TEXT_LOG.remove(sizing)
     glow = RoundedRectangle(corner_radius=0.5, width=sizing.width + 1.4, height=sizing.height + 1.0,
                             stroke_color=a, stroke_width=5, stroke_opacity=0.55)
-    if m and len(m.group(2).replace(",", "")) <= 12:
+    is_range = bool(m and re.match(r"\s*([-–—]|to\b)", m.group(3) or ""))  # "100-400": show as text, no count-up
+    if m and len(m.group(2).replace(",", "")) <= 12 and not is_range:
         pre, num, post = m.groups()
         target = float(num.replace(",", ""))
         decimals = len(num.split(".")[1]) if "." in num else 0
@@ -729,9 +785,9 @@ def formula(spec, a, b) -> Built:
     top = VGroup(fbox, f)
     rows, highlights = [], []
     for term in spec["terms"]:
-        sym = T(term["symbol"], 34, color=a, bold=True, font=MONO)
-        dash = T("=", 30, color=MUTED)
-        mean = T(term["meaning"], 32, width=40, max_w=8.5)
+        sym = T(term["symbol"], V(34, 46), color=a, bold=True, font=MONO)
+        dash = T("=", V(30, 42), color=MUTED)
+        mean = T(term["meaning"], V(32, 42), width=V(40, 18), max_w=V(8.5, 5.4))
         rows.append(VGroup(sym, dash, mean).arrange(RIGHT, buff=0.3))
     legend = VGroup(*rows).arrange(DOWN, buff=0.3, aligned_edge=LEFT) if rows else VGroup()
     content = VGroup(top, legend).arrange(DOWN, buff=0.7) if rows else top
@@ -791,7 +847,7 @@ def summary(spec, a, b) -> Built:
         badge = VGroup(Circle(radius=0.32, fill_color=a, fill_opacity=1, stroke_width=0),
                        T(str(i + 1), 26, color=BG, bold=True))
         badge[1].move_to(badge[0])
-        txt = T(p, 36, width=46, max_w=10.6)
+        txt = T(p, V(36, 40), width=V(46, 20), max_w=V(10.6, 6.2))
         rows.append(VGroup(badge, txt).arrange(RIGHT, buff=0.4))
     g = VGroup(*rows).arrange(DOWN, buff=0.5, aligned_edge=LEFT)
     return Built(g, units=[(lambda r=r: AnimationGroup(GrowFromCenter(r[0]), FadeIn(r[1], shift=RIGHT * 0.3),

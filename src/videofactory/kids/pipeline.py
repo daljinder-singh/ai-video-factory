@@ -55,9 +55,8 @@ def kids_metadata(script: dict, lang: str, offsets: list[float], total: float) -
         last = off
     ch_txt = "\n".join(f"{int(t) // 60}:{int(t) % 60:02} {n}" for t, n in chapters) if len(chapters) >= 3 else ""
     description = "\n".join(x for x in [desc, "", "Chapters:" if ch_txt else "", ch_txt, "",
-                                        "Music: original, generated for this video.",
-                                        "Emoji graphics: Twemoji (https://github.com/jdecked/twemoji), licensed CC-BY 4.0.",
-                                        "#kidslearning #toddlers #preschool"] if x is not None)
+                                        "#kidslearning #toddlers #preschool", "",
+                                        "Pictures: Twemoji (CC-BY 4.0)"] if x is not None)
     tags = ["kids learning", "toddler learning", "preschool", t_en.lower(), f"learn {t_en.lower()}", "for kids",
             "educational video for kids", "nursery", "kindergarten", "baby learning"]
     if lang == "hi":
@@ -81,7 +80,7 @@ def make_kids_video(settings: Settings, topic: str | None = None, lang: str = "e
     if resume and (resume / "script.json").exists():  # continue exactly the saved video
         saved = json.loads((resume / "script.json").read_text())
         topic, lang, seed = saved["topic"], saved["lang"], saved.get("seed", seed)
-    lang = "hi" if lang in ("hi", "hinglish") else "en"
+    lang = "en"  # English only
     seed = seed if seed is not None else random.randrange(1_000_000)
     topic = topic or random.Random(seed).choice(list(TOPICS))
     folder = resume or Path(settings.output_dir) / f"{datetime.now():%Y%m%d-%H%M}_kids-{topic}-{lang}"
@@ -102,8 +101,7 @@ def make_kids_video(settings: Settings, topic: str | None = None, lang: str = "e
     if np_.exists():
         narrs = json.loads(np_.read_text())
     else:
-        voice = settings.voices["hi" if lang == "hi" else "en"]
-        narrator = Narrator(Path(settings.models_dir) / "piper" / f"{voice}.onnx", KIDS_SPEED * settings.speech_speed)
+        narrator = Narrator(settings.kids_voice, KIDS_SPEED * settings.speech_speed)
         narrs = [narrate_parts(narrator, sc["parts"], run.path("audio", f"scene_{sc['index']:02}.wav")) for sc in scenes]
         np_.write_text(json.dumps(narrs, indent=2, ensure_ascii=False))
     run.log(f"Narration: {sum(n['duration'] for n in narrs) / 60:.1f} min")

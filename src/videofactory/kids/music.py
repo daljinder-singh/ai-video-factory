@@ -11,6 +11,16 @@ import numpy as np
 
 SR = 44100
 MAJOR = [0, 2, 4, 5, 7, 9, 11]
+MINOR = [0, 2, 3, 5, 7, 8, 10]
+# mood: scale, tempo choices, melody level, pad level, kick on every beat?, shaker?, sparse melody?
+MOODS = {
+    "curious": (MAJOR, [100, 108, 116], 0.33, 0.16, False, True, False),
+    "uplifting": (MAJOR, [108, 116, 120], 0.33, 0.18, False, True, False),
+    "calm": (MAJOR, [80, 86, 92], 0.24, 0.20, False, False, True),
+    "mysterious": (MINOR, [76, 82, 88], 0.22, 0.24, False, False, True),
+    "dramatic": (MINOR, [96, 104, 110], 0.28, 0.22, True, False, False),
+}
+_SCALE = MAJOR
 PROGRESSIONS = [[0, 4, 5, 3], [0, 3, 4, 0], [0, 5, 3, 4], [0, 3, 0, 4]]  # I-V-vi-IV etc. (scale degrees)
 RHYTHMS = [[1, 1, 1, 1], [0.5, 0.5, 1, 1, 1], [1, 0.5, 0.5, 2], [0.5, 0.5, 0.5, 0.5, 1, 1], [1.5, 0.5, 1, 1]]
 
@@ -21,7 +31,7 @@ def _freq(midi: float) -> float:
 
 def _degree_to_midi(root: int, degree: int) -> int:
     octave, idx = divmod(degree, 7)
-    return root + 12 * octave + MAJOR[idx]
+    return root + 12 * octave + _SCALE[idx]
 
 
 def _marimba(f: float, dur: float) -> np.ndarray:
@@ -81,9 +91,15 @@ def _phrase(rng: np.random.Generator, prog: list[int]) -> list[tuple[float, floa
     return notes
 
 
-def make_music(duration: float, out: Path, seed: int) -> dict:
+def make_music(duration: float, out: Path, seed: int, mood: str | None = None,
+               envelope: list[tuple[float, float, float]] | None = None) -> dict:
+    """mood: curious | uplifting | calm | mysterious | dramatic (None = the original kids style).
+    envelope: [(start_s, end_s, gain)] volume curve, e.g. louder at the hook and reveals, softer while explaining."""
+    global _SCALE
     rng = np.random.default_rng(seed)
-    bpm = int(rng.choice([96, 104, 110, 116]))
+    scale, tempos, mel_lvl, pad_lvl, kick_every, shaker_on, sparse = MOODS.get(mood or "curious", MOODS["curious"])
+    _SCALE = scale
+    bpm = int(rng.choice([96, 104, 110, 116] if mood is None else tempos))
     beat = 60.0 / bpm
     root = int(rng.choice([60, 62, 65, 67]))  # C, D, F, G major
     prog = PROGRESSIONS[rng.integers(len(PROGRESSIONS))]
@@ -98,20 +114,22 @@ def make_music(duration: float, out: Path, seed: int) -> dict:
             for bar, chord in enumerate(chords):
                 bar_t = t0 + bar * 4 * beat
                 tones = [_freq(_degree_to_midi(root - 12, chord + d)) for d in (0, 2, 4)]
-                _add(left, 0.16 * _pad(tones, 4 * beat, -0.002), bar_t)
-                _add(right, 0.16 * _pad(tones, 4 * beat, 0.002), bar_t)
+                _add(left, pad_lvl * _pad(tones, 4 * beat, -0.002), bar_t)
+                _add(right, pad_lvl * _pad(tones, 4 * beat, 0.002), bar_t)
                 bass_f = _freq(_degree_to_midi(root - 24, chord))
-                for bt in (0, 2):
+                for bt in ((0, 1, 2, 3) if kick_every else (0, 2)):
                     sig = 0.32 * _bass(bass_f, 2 * beat)
                     _add(left, sig, bar_t + bt * beat)
                     _add(right, sig, bar_t + bt * beat)
                     _add(left, 0.22 * _kick(), bar_t + bt * beat)
                     _add(right, 0.22 * _kick(), bar_t + bt * beat)
-                for half in range(8):
+                for half in range(8 if shaker_on else 0):
                     s = 0.07 * _shaker(rng)
                     _add(left if half % 2 else right, s, bar_t + half * beat / 2)
-            for start, length, deg in phrase:
-                sig = 0.33 * _marimba(_freq(_degree_to_midi(root, deg)), length * beat + 0.4)
+            for n_i, (start, length, deg) in enumerate(phrase):
+                if sparse and n_i % 2:
+                    continue  # calm / mysterious moods: fewer notes
+                sig = mel_lvl * _marimba(_freq(_degree_to_midi(root, deg)), length * beat + 0.4)
                 _add(left, sig * 0.9, t0 + start * beat)
                 _add(right, sig, t0 + start * beat)
             t0 += 16 * beat
@@ -124,10 +142,19 @@ def make_music(duration: float, out: Path, seed: int) -> dict:
     mix[-fade_out:] *= np.linspace(1, 0, fade_out)[:, None]
     mix /= np.max(np.abs(mix)) or 1
     mix *= 0.85
+    if envelope:  # smooth volume automation (0.6 s ramps)
+        g = np.ones(len(mix))
+        for a, b, gain in envelope:
+            g[int(a * SR): int(b * SR)] = gain
+        k = int(0.6 * SR)
+        g = np.convolve(np.pad(g, (k, k), mode="edge"), np.ones(k) / k, mode="same")[k:-k]
+        mix *= g[:, None]
     out.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(out), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(SR)
         w.writeframes((mix * 32767).astype(np.int16).tobytes())
-    return {"bpm": bpm, "key": ["C", "D", "F", "G"][[60, 62, 65, 67].index(root)] + " major", "seed": seed}
+    key = ["C", "D", "F", "G"][[60, 62, 65, 67].index(root)] + (" minor" if scale is MINOR else " major")
+    _SCALE = MAJOR
+    return {"bpm": bpm, "key": key, "seed": seed, "mood": mood or "kids"}

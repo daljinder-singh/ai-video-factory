@@ -38,8 +38,8 @@ def build(script: VideoScript, offsets: list[float], total: float, lang_name: st
     desc = [script.description.strip(), ""]
     if chs:
         desc += ["Chapters:", *[f"{_stamp(t)} {name}" for t, name in chs], ""]
-    desc += [f"Source: Wikipedia – \"{script.source_title}\" ({script.source_url}), licensed CC BY-SA 4.0.",
-             "Narration voice and animations were generated automatically.", "", hashtags]
+    # licence-required credit, kept to one short line at the very bottom
+    desc += [hashtags, "", f"Sources: Wikipedia \"{script.source_title}\" (CC BY-SA 4.0)"]
     return {
         "title": script.title[:100],
         "description": "\n".join(desc)[:4900],
@@ -57,4 +57,6 @@ def write(meta: dict, folder: Path) -> None:
     text = (f"TITLE\n{meta['title']}\n\nDESCRIPTION\n{meta['description']}\n\nTAGS\n{', '.join(meta['tags'])}\n\n"
             f"CATEGORY: {meta['category']}   LANGUAGE: {meta['language']}   MADE FOR KIDS: No\n"
             "Upload thumbnail.png as the custom thumbnail and subtitles.srt under Subtitles.\n")
+    if meta.get("title_options"):
+        text += "\nOTHER TITLE IDEAS\n" + "\n".join(f"- {t}" for t in meta["title_options"]) + "\n"
     (folder / "youtube_upload.txt").write_text(text, encoding="utf-8")
